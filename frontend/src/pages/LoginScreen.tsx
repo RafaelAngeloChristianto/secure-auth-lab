@@ -3,6 +3,7 @@ import { useState } from "react";
 import { HiEye, HiEyeOff } from "react-icons/hi";
 import caligraphy from "../../public/caligraphy_white.png";
 import { useNavigate } from "react-router-dom";
+import axios from "axios";
 
 function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -11,10 +12,28 @@ function LoginScreen() {
 
   const navigate = useNavigate();
 
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     console.log(email, password);
-    navigate("/home");
+
+    try {
+      const res = await axios.post("http://localhost:3000/login", {
+        email: email,
+        password: password,
+      });
+
+      console.log(res.data)
+    
+      if (res.data.token) {
+        localStorage.setItem("token", res.data.token)
+        navigate("/home");
+      } else {
+        alert("Invalid Credentials")
+      }
+    } catch (error) {
+      console.error("Login failed:", error);
+      alert("Invalid Credentials")
+    }
   };
 
   const togglePasswordVisibility = () => {
@@ -40,6 +59,7 @@ function LoginScreen() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             className="w-[350px] h-[45px] rounded-[10px] border-[1px] p-[5px]"
+            required
           />
 
           <label
@@ -55,6 +75,7 @@ function LoginScreen() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="w-full h-[45px] rounded-[10px] border-[1px] pr-10 p-[5px]"
+              required
             />
 
             <button

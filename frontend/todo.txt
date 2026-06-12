@@ -1,0 +1,4 @@
+1. otp
+
+INSERT INTO otp_codes (email, otp, expires_at)
+VALUES (?, ?, NOW() + INTERVAL 5 MINUTE);

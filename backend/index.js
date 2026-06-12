@@ -1,10 +1,147 @@
 const express = require("express");
-const db = require("./db")
+const db = require("./db");
+const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
+const cors = require("cors");
+const nodemailer = require("nodemailer");
+
 
 require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT;
+const SECRET_KEY = process.env.JWT_SECRET;
 
 app.use(express.json());
+app.use(cors());
 
 app.listen(PORT, () => console.log(`Server listening on PORT ${PORT}`));
+
+const transporter = nodemailer.createTransport({
+  service:"gmail",
+  auth: {
+    user: "rafaaelangelo@gmail.com",
+    pass: "jqxk orpn yjtr chgh"
+  }
+})
+
+const sendOtp = async (email, otp) => {
+  await transporter.sendMail({
+    from:"rafaaelangelo@gmail.com",
+    to: email,
+    subject: "Your OTP Code",
+    text: `Your OTP code is ${otp}. Please do not share this with anyone.`
+  })
+}
+
+app.post("/register", async (req, res) => {
+  const { email, password } = req.body;
+
+  let sql = "INSERT INTO users (email, passwd) VALUES (?, ?)";
+
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    let sql = "INSERT INTO users (email, passwd) values (?, ?)";
+
+    await db.execute(sql, [email, hashedPassword]);
+    res.status(200).send("User Created");
+  } catch (err) {
+    console.log(err);
+    res.status(500).send("Error creating user");
+  }
+});
+
+app.post("/login", async (req, res) => {
+  const { email, password } = req.body;
+
+  if (!email || !password) {
+    return res.status(400).send("Email and password required");
+  }
+
+  try {
+    let sql = "SELECT * FROM users WHERE email = ?";
+    const [rows] = await db.execute(sql, [email]);
+
+    if (rows.length === 0) {
+      return res.status(401).send("Invalid Credentials");
+    }
+
+    const users = rows[0];
+
+    const isMatch = await bcrypt.compare(password, users.passwd);
+    if (!isMatch) {
+      return res.status(401).send("Invalid Credentials");
+    }
+
+    const token = jwt.sign({ id: users.id, email: users.email }, SECRET_KEY, {
+      expiresIn: "1h",
+    });
+
+    res.json({ token });
+  } catch (err) {
+    console.log(err);
+    res.status(500).send("Error logging in");
+  }
+});
+
+function authMiddleware(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader) {
+    return res.status(401).send("No token");
+  }
+
+  const token = authHeader.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, SECRET_KEY);
+    req.user = decoded;
+    next();
+  } catch (err) {
+    res.status(403).send("Invalid token");
+  }
+}
+
+app.get("/dashboard", authMiddleware, (req, res) => {
+  res.json({ message: `Welcome to your dashboard, ${req.user.email}` });
+});
+
+const generateOTP = () => {
+  return Math.floor(100000 + Math.random() * 900000).toString();
+};
+
+app.post("/request-otp", async (req, res) => {
+  const { email } = res.body;
+
+  const otp = generateOTP();
+  const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
+
+  await db.query(
+    "INSERT INTO otp_codes (email, otp, expires_at) VALUES (?, ?, ?)", [email, otp, expiresAt]
+  )
+
+  await sendOtp(email, otp)
+
+  res.json({message:"OTP Sent"})
+});
+
+app.post("/verify-otp", async (req, res) => {
+  const { email, otp } = req.body;
+
+  const [rows] = await db.query(
+    "SELECT * FROM otp_codes WHERE email = ? AND otp = ? AND expires_at > NOW()", [email, otp]
+  )
+
+  if (rows.length === 0) {
+    return res.status(400).json({error:"Invalid or expired OTP"})
+  }
+
+  const record = rows[0]
+
+  if (new Date() > new Date(record.expires_at)) {
+    return res.status(400).json({message:"OTP Expired! "})
+  }
+
+  await db.query("DELETE FROM otp_codes WHERE email = ? AND otp = ?", [email, otp])
+
+  res.json({message:"OTP Verified"})
+})

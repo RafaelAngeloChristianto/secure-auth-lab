@@ -9,3 +9,12 @@ const db = mysql.createConnection({
 })
 
 module.exports = db.promise()
+
+db.connect((err) => {
+    if (err) {
+        console.log("Connection failed", err)
+    } else {
+        console.log("Connected to MySQL")
+    }
+})
+
