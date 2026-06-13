@@ -5,11 +5,11 @@ const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
 
-
 require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT;
 const SECRET_KEY = process.env.JWT_SECRET;
+const AUTH_PASS = process.env.AUTH_PASS;
 
 app.use(express.json());
 app.use(cors());
@@ -17,21 +17,21 @@ app.use(cors());
 app.listen(PORT, () => console.log(`Server listening on PORT ${PORT}`));
 
 const transporter = nodemailer.createTransport({
-  service:"gmail",
+  service: "gmail",
   auth: {
-    user: "rafaaelangelo@gmail.com",
-    pass: "jqxk orpn yjtr chgh"
-  }
-})
+    user: "angelorafael0508@gmail.com",
+    pass: AUTH_PASS ,
+  },
+});
 
 const sendOtp = async (email, otp) => {
   await transporter.sendMail({
-    from:"rafaaelangelo@gmail.com",
+    from: "angelorafael0508@gmail.com",
     to: email,
     subject: "Your OTP Code",
-    text: `Your OTP code is ${otp}. Please do not share this with anyone.`
-  })
-}
+    text: `Your OTP code is ${otp}. Please do not share this with anyone.`,
+  });
+};
 
 app.post("/register", async (req, res) => {
   const { email, password } = req.body;
@@ -46,6 +46,10 @@ app.post("/register", async (req, res) => {
     res.status(200).send("User Created");
   } catch (err) {
     console.log(err);
+
+    if (err.code === "ER_DUP_ENTRY") {
+      return res.status(400).send("Email already exists");
+    }
     res.status(500).send("Error creating user");
   }
 });
@@ -110,38 +114,67 @@ const generateOTP = () => {
 };
 
 app.post("/request-otp", async (req, res) => {
-  const { email } = res.body;
+  const { email } = req.body;
 
   const otp = generateOTP();
   const expiresAt = new Date(Date.now() + 5 * 60 * 1000);
 
   await db.query(
-    "INSERT INTO otp_codes (email, otp, expires_at) VALUES (?, ?, ?)", [email, otp, expiresAt]
-  )
+    "INSERT INTO otp_codes (email, otp, expires_at) VALUES (?, ?, ?)",
+    [email, otp, expiresAt],
+  );
 
-  await sendOtp(email, otp)
+  await sendOtp(email, otp);
 
-  res.json({message:"OTP Sent"})
+  res.json({ message: "OTP Sent" });
 });
 
 app.post("/verify-otp", async (req, res) => {
-  const { email, otp } = req.body;
+  const { email, otp, password } = req.body;
 
-  const [rows] = await db.query(
-    "SELECT * FROM otp_codes WHERE email = ? AND otp = ? AND expires_at > NOW()", [email, otp]
-  )
-
-  if (rows.length === 0) {
-    return res.status(400).json({error:"Invalid or expired OTP"})
+  // 1. Basic validation
+  if (!email || !otp || !password) {
+    return res.status(400).json({ error: "Missing required fields" });
   }
 
-  const record = rows[0]
+  try {
+    // 2. Check OTP (valid & not expired)
+    const [rows] = await db.query(
+      "SELECT * FROM otp_codes WHERE email = ? AND otp = ? AND expires_at > NOW()",
+      [email, otp],
+    );
 
-  if (new Date() > new Date(record.expires_at)) {
-    return res.status(400).json({message:"OTP Expired! "})
+    if (rows.length === 0) {
+      return res.status(400).json({ error: "Invalid or expired OTP" });
+    }
+
+    // 3. Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // 4. Create user
+    try {
+      await db.execute("INSERT INTO users (email, passwd) VALUES (?, ?)", [
+        email,
+        hashedPassword,
+      ]);
+    } catch (err) {
+      if (err.code === "ER_DUP_ENTRY") {
+        return res.status(400).json({ error: "User already exists" });
+      }
+      console.log("REGISTER ERROR:", err);
+      return res.status(500).json({ error: "Error creating user" });
+    }
+
+    // 5. Delete OTP after success
+    await db.query("DELETE FROM otp_codes WHERE email = ? AND otp = ?", [
+      email,
+      otp,
+    ]);
+
+    // 6. Success response
+    res.json({ message: "User created successfully" });
+  } catch (err) {
+    console.log("VERIFY OTP ERROR:", err);
+    res.status(500).json({ error: "Server error" });
   }
-
-  await db.query("DELETE FROM otp_codes WHERE email = ? AND otp = ?", [email, otp])
-
-  res.json({message:"OTP Verified"})
-})
+});
