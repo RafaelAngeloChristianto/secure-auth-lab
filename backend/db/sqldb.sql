@@ -8,12 +8,14 @@ CREATE TABLE users (
   passwd VARCHAR(255) NOT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-SELECT * FROM users;
+SELECT * FROM users;	
+TRUNCATE TABLE users;
 
 CREATE TABLE otp_codes (
 	id INT AUTO_INCREMENT PRIMARY KEY,
     email VARCHAR(255) NOT NULL UNIQUE,
     otp INT,
     expires_at TIMESTAMP 
-);s
+);
 SELECT * FROM otp_codes;
+TRUNCATE TABLE otp_codes;

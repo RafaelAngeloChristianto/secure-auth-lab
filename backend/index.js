@@ -79,15 +79,15 @@ app.post("/login", async (req, res) => {
     const score = captchaData.score;
 
     console.log("Captcha score:", score);
-    // if (score < 0.5) {
-    //   return res.status(403).send("Suspicious activity");
-    // }
-    // if (score < 0.7) {
-    //   return res.json({ requireOTP: true });
-    // }
-    // if (!captchaRes.data.success) {
-    //   return res.status(403).send("Captcha verification failed");
-    // }
+    if (score < 0.5) {
+      return res.status(403).send("Suspicious activity");
+    }
+    if (score < 0.7) {
+      return res.json({ requireOTP: true });
+    }
+    if (!captchaRes.data.success) {
+      return res.status(403).send("Captcha verification failed");
+    }
 
     let sql = "SELECT * FROM users WHERE email = ?";
     const [rows] = await db.execute(sql, [email]);
@@ -98,12 +98,44 @@ app.post("/login", async (req, res) => {
 
     const user = rows[0];
 
+    if (user.locked_until && new Date(user.locked_until) > new Date()) {
+      return res.status(403).send("Account locked. Try again later");
+    }
+
     console.log("Stored password:", user.passwd);
     const isMatch = await bcrypt.compare(password, user.passwd);
-    console.log("Password match:", isMatch);
     if (!isMatch) {
-      return res.status(401).send("Invalid Credentials");
+      let failedAttempts = (user.failed_attempts || 0) + 1;
+
+      console.log("Failed attempts:", failedAttempts);
+
+      if (failedAttempts >= 5) {
+        await db.execute(
+          "UPDATE users SET failed_attempts = 0, locked_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE) WHERE id = ?",
+          [user.id],
+        );
+
+        return res.status(403).json({
+          code: "ACCOUNT_LOCKED",
+          message:
+            "Too many failed attempts. Your account is locked for 15 minutes.",
+        });
+      }
+
+      await db.execute("UPDATE users SET failed_attempts = ? WHERE id = ?", [
+        failedAttempts,
+        user.id,
+      ]);
+
+      return res.status(401).json({
+        message: "Invalid Credentials",
+      });
     }
+
+    await db.execute(
+      "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?",
+      [user.id],
+    );
 
     const jwtToken = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, {
       expiresIn: "1h",

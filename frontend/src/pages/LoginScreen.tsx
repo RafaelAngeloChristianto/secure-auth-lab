@@ -39,7 +39,7 @@ function LoginScreen() {
       });
 
       if (res.data.jwtToken) {
-        localStorage.setItem("token", res.data.token);
+        localStorage.setItem("token", res.data.jwtToken);
         navigate("/home");
       } else if (res.data.requireOTP) {
         navigate("/otpscreen");
@@ -48,10 +48,14 @@ function LoginScreen() {
       }
       console.log(res.data);
     } catch (error) {
-      if (error.response?.status === 403) {
-        alert("Suspicious activity detected");
+      const data = error.response?.data;
+
+      if (data?.code === "ACCOUNT_LOCKED") {
+        alert(
+          "Account locked after 5 failed login attempts. Try again in 15 minutes.",
+        );
       } else {
-        alert("Invalid Credentials");
+        alert(data?.message || "Invalid Credentials");
       }
     }
   };
