@@ -4,6 +4,8 @@ const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 const cors = require("cors");
 const nodemailer = require("nodemailer");
+const rateLimit = require("express-rate-limit");
+const axios = require("axios");
 
 require("dotenv").config();
 const app = express();
@@ -16,11 +18,24 @@ app.use(cors());
 
 app.listen(PORT, () => console.log(`Server listening on PORT ${PORT}`));
 
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  message: "Too many login attempts. Try again later",
+});
+const otpLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  max: 5,
+  message: "Too many OTP requests. Try again later",
+});
+app.use("/login", loginLimiter);
+app.use("/verify-otp", otpLimiter);
+
 const transporter = nodemailer.createTransport({
   service: "gmail",
   auth: {
     user: "angelorafael0508@gmail.com",
-    pass: AUTH_PASS ,
+    pass: AUTH_PASS,
   },
 });
 
@@ -33,35 +48,47 @@ const sendOtp = async (email, otp) => {
   });
 };
 
-app.post("/register", async (req, res) => {
-  const { email, password } = req.body;
-
-  let sql = "INSERT INTO users (email, passwd) VALUES (?, ?)";
-
-  try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    let sql = "INSERT INTO users (email, passwd) values (?, ?)";
-
-    await db.execute(sql, [email, hashedPassword]);
-    res.status(200).send("User Created");
-  } catch (err) {
-    console.log(err);
-
-    if (err.code === "ER_DUP_ENTRY") {
-      return res.status(400).send("Email already exists");
-    }
-    res.status(500).send("Error creating user");
-  }
-});
-
 app.post("/login", async (req, res) => {
-  const { email, password } = req.body;
+  console.log("=== LOGIN ROUTE TRIGGERED ===");
+  const { email, password, captchaToken } = req.body;
 
   if (!email || !password) {
     return res.status(400).send("Email and password required");
   }
 
+  if (!captchaToken) {
+    return res.status(400).send("Captcha token required");
+  }
+
   try {
+    console.log("Incoming login:", { email, captchaToken });
+    const captchaRes = await axios.post(
+      "https://www.google.com/recaptcha/api/siteverify",
+      null,
+      {
+        params: {
+          secret: process.env.RECAPTCHA_SECRET_KEY,
+          response: captchaToken,
+        },
+      },
+    );
+
+    console.log("Captcha response:", captchaRes.data);
+
+    const captchaData = captchaRes.data;
+    const score = captchaData.score;
+
+    console.log("Captcha score:", score);
+    // if (score < 0.5) {
+    //   return res.status(403).send("Suspicious activity");
+    // }
+    // if (score < 0.7) {
+    //   return res.json({ requireOTP: true });
+    // }
+    // if (!captchaRes.data.success) {
+    //   return res.status(403).send("Captcha verification failed");
+    // }
+
     let sql = "SELECT * FROM users WHERE email = ?";
     const [rows] = await db.execute(sql, [email]);
 
@@ -69,20 +96,22 @@ app.post("/login", async (req, res) => {
       return res.status(401).send("Invalid Credentials");
     }
 
-    const users = rows[0];
+    const user = rows[0];
 
-    const isMatch = await bcrypt.compare(password, users.passwd);
+    console.log("Stored password:", user.passwd);
+    const isMatch = await bcrypt.compare(password, user.passwd);
+    console.log("Password match:", isMatch);
     if (!isMatch) {
       return res.status(401).send("Invalid Credentials");
     }
 
-    const token = jwt.sign({ id: users.id, email: users.email }, SECRET_KEY, {
+    const jwtToken = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, {
       expiresIn: "1h",
     });
 
-    res.json({ token });
+    res.json({ jwtToken });
   } catch (err) {
-    console.log(err);
+    console.error(err);
     res.status(500).send("Error logging in");
   }
 });
@@ -132,13 +161,11 @@ app.post("/request-otp", async (req, res) => {
 app.post("/verify-otp", async (req, res) => {
   const { email, otp, password } = req.body;
 
-  // 1. Basic validation
   if (!email || !otp || !password) {
     return res.status(400).json({ error: "Missing required fields" });
   }
 
   try {
-    // 2. Check OTP (valid & not expired)
     const [rows] = await db.query(
       "SELECT * FROM otp_codes WHERE email = ? AND otp = ? AND expires_at > NOW()",
       [email, otp],
@@ -148,10 +175,8 @@ app.post("/verify-otp", async (req, res) => {
       return res.status(400).json({ error: "Invalid or expired OTP" });
     }
 
-    // 3. Hash password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // 4. Create user
     try {
       await db.execute("INSERT INTO users (email, passwd) VALUES (?, ?)", [
         email,
@@ -165,13 +190,11 @@ app.post("/verify-otp", async (req, res) => {
       return res.status(500).json({ error: "Error creating user" });
     }
 
-    // 5. Delete OTP after success
     await db.query("DELETE FROM otp_codes WHERE email = ? AND otp = ?", [
       email,
       otp,
     ]);
 
-    // 6. Success response
     res.json({ message: "User created successfully" });
   } catch (err) {
     console.log("VERIFY OTP ERROR:", err);

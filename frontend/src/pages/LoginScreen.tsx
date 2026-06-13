@@ -4,6 +4,7 @@ import { HiEye, HiEyeOff } from "react-icons/hi";
 import caligraphy from "../../public/caligraphy_white.png";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import { useGoogleReCaptcha } from "react-google-recaptcha-v3";
 
 function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -11,28 +12,47 @@ function LoginScreen() {
   const [showPassword, setShowPassword] = useState();
 
   const navigate = useNavigate();
+  const { executeRecaptcha } = useGoogleReCaptcha();
 
   const handleLogin = async (e) => {
+    console.log("LOGIN BUTTON CLICKED");
     e.preventDefault();
     console.log(email, password);
+
+    if (!executeRecaptcha) {
+      alert("Recaptcha not ready");
+      return;
+    }
+
+    const token = await executeRecaptcha("login");
+    console.log("Captcha token:", token);
+    if (!token) {
+      alert("Failed to get captcha token");
+      return;
+    }
 
     try {
       const res = await axios.post("http://localhost:3000/login", {
         email: email,
         password: password,
+        captchaToken: token,
       });
 
-      console.log(res.data)
-    
-      if (res.data.token) {
-        localStorage.setItem("token", res.data.token)
+      if (res.data.jwtToken) {
+        localStorage.setItem("token", res.data.token);
         navigate("/home");
+      } else if (res.data.requireOTP) {
+        navigate("/otpscreen");
       } else {
-        alert("Invalid Credentials")
+        alert("Invalid Credentials");
       }
+      console.log(res.data);
     } catch (error) {
-      console.error("Login failed:", error);
-      alert("Invalid Credentials")
+      if (error.response?.status === 403) {
+        alert("Suspicious activity detected");
+      } else {
+        alert("Invalid Credentials");
+      }
     }
   };
 
