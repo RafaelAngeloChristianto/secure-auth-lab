@@ -20,6 +20,16 @@ function SignUpScreen() {
       return;
     }
 
+    const unmetRules = rules.filter((rule) => !rule.met);
+
+    if (unmetRules.length > 0) {
+      alert(
+        "Password does not meet requirements:\n" +
+          unmetRules.map((r) => `- ${r.label}`).join("\n"),
+      );
+      return;
+    }
+
     try {
       await axios.post("http://localhost:3000/request-otp", {
         email: email,
