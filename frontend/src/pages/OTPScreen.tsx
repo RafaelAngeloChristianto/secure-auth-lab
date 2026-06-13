@@ -2,6 +2,7 @@ import { useLocation } from "react-router-dom";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useRef, useState } from "react";
+import caligraphy from "../../public/caligraphy_white.png";
 
 function OTPScreen() {
   const [otp, setOtp] = useState(["", "", "", "", "", ""]);
@@ -11,6 +12,7 @@ function OTPScreen() {
 
   const { state } = useLocation();
   const email = state?.email;
+  const password = state?.password;
 
   const handleChange = (value, index) => {
     if (!/^\d?$/.test(value)) return;
@@ -40,10 +42,11 @@ function OTPScreen() {
       await axios.post("http://localhost:3000/verify-otp", {
         email,
         otp: finalOtp,
+        password
       });
 
       alert("OTP Verified!");
-      navigate("/");
+      navigate("/home");
     } catch {
       alert("Invalid or Expired OTP");
     }
@@ -78,7 +81,9 @@ function OTPScreen() {
           onClick={handleSubmit}
         />
       </div>
-      <div className="flex w-[50%] ml-auto bg-[#1F305E] items-center justify-center gap-6 p-8"></div>
+      <div className="flex w-[50%] ml-auto bg-[#1F305E] items-center justify-center gap-6 p-8">
+        <img className="w-[250px] h-[250px]" src={caligraphy} alt="" />
+      </div>
     </div>
   );
 }

@@ -24,7 +24,7 @@ function SignUpScreen() {
       await axios.post("http://localhost:3000/request-otp", {
         email: email,
       });
-      navigate("/otpscreen", { state: { email } });
+      navigate("/otpscreen", { state: { email, password } });
     } catch (error) {
       console.error("Login failed:", error);
     }

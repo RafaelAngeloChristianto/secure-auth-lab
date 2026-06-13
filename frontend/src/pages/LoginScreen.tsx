@@ -43,7 +43,7 @@ function LoginScreen() {
   return (
     <div className="flex min-h-screen">
       <div className="flex w-[50%] mr-auto bg-[#1F305E] items-center justify-center gap-6 p-8">
-        <img className="w-[250px h-[250px]" src={caligraphy} alt="" />
+        <img className="w-[250px] h-[250px]" src={caligraphy} alt="" />
       </div>
       <div className="flex ml-auto w-[50%] min-h-screen flex-col items-center justify-center gap-6 p-8">
         <form
