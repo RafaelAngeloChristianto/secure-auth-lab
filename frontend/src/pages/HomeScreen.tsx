@@ -1,4 +1,4 @@
-import axios from "axios"
+import axios from "axios";
 import { useEffect } from "react";
 
 import { useNavigate } from "react-router-dom";
@@ -15,14 +15,19 @@ function HomeScreen() {
           },
         });
 
-        console.log(res.data)
+        console.log(res.data);
       } catch (error) {
         console.error("Error fetching data:", error);
-      }
-    }
 
-    fetchData()
-  }, [])
+        console.log("Unauthorized or error");
+
+        localStorage.removeItem("token");
+        window.location.href = "/login";
+      }
+    };
+
+    fetchData();
+  }, []);
 
   const navigate = useNavigate();
 
