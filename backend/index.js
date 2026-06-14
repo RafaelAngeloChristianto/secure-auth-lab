@@ -6,6 +6,10 @@ const cors = require("cors");
 const nodemailer = require("nodemailer");
 const rateLimit = require("express-rate-limit");
 const axios = require("axios");
+const helmet = require("helmet")
+const {body} = require("express-validator")
+const cookieParser = require("cookie-parser")
+
 
 require("dotenv").config();
 const app = express();
@@ -13,8 +17,13 @@ const PORT = process.env.PORT;
 const SECRET_KEY = process.env.JWT_SECRET;
 const AUTH_PASS = process.env.AUTH_PASS;
 
+app.use(helmet())
 app.use(express.json());
-app.use(cors());
+app.use(cors({
+  origin:"http://localhost:5173",
+  credentials:true
+}));
+app.use(cookieParser())
 
 app.listen(PORT, () => console.log(`Server listening on PORT ${PORT}`));
 
@@ -61,87 +70,91 @@ app.post("/login", async (req, res) => {
   }
 
   try {
-    console.log("Incoming login:", { email, captchaToken });
-    const captchaRes = await axios.post(
-      "https://www.google.com/recaptcha/api/siteverify",
-      null,
-      {
-        params: {
-          secret: process.env.RECAPTCHA_SECRET_KEY,
-          response: captchaToken,
+    body("email").isEmail().normalizeEmail(),
+    body("password").isLength({ min: 6 }),
+    (req, res) => {
+      console.log("Incoming login:", { email, captchaToken });
+      const captchaRes = await axios.post(
+        "https://www.google.com/recaptcha/api/siteverify",
+        null,
+        {
+          params: {
+            secret: process.env.RECAPTCHA_SECRET_KEY,
+            response: captchaToken,
+          },
         },
-      },
-    );
+      );
 
-    console.log("Captcha response:", captchaRes.data);
+      console.log("Captcha response:", captchaRes.data);
 
-    const captchaData = captchaRes.data;
-    const score = captchaData.score;
+      const captchaData = captchaRes.data;
+      const score = captchaData.score;
 
-    console.log("Captcha score:", score);
-    if (score < 0.5) {
-      return res.status(403).send("Suspicious activity");
-    }
-    if (score < 0.7) {
-      return res.json({ requireOTP: true });
-    }
-    if (!captchaRes.data.success) {
-      return res.status(403).send("Captcha verification failed");
-    }
+      console.log("Captcha score:", score);
+      if (score < 0.5) {
+        return res.status(403).send("Suspicious activity");
+      }
+      if (score < 0.7) {
+        return res.json({ requireOTP: true });
+      }
+      if (!captchaRes.data.success) {
+        return res.status(403).send("Captcha verification failed");
+      }
 
-    let sql = "SELECT * FROM users WHERE email = ?";
-    const [rows] = await db.execute(sql, [email]);
+      let sql = "SELECT * FROM users WHERE email = ?";
+      const [rows] = await db.execute(sql, [email]);
 
-    if (rows.length === 0) {
-      return res.status(401).send("Invalid Credentials");
-    }
+      if (rows.length === 0) {
+        return res.status(401).send("Invalid Credentials");
+      }
 
-    const user = rows[0];
+      const user = rows[0];
 
-    if (user.locked_until && new Date(user.locked_until) > new Date()) {
-      return res.status(403).send("Account locked. Try again later");
-    }
+      if (user.locked_until && new Date(user.locked_until) > new Date()) {
+        return res.status(403).send("Account locked. Try again later");
+      }
 
-    console.log("Stored password:", user.passwd);
-    const isMatch = await bcrypt.compare(password, user.passwd);
-    if (!isMatch) {
-      let failedAttempts = (user.failed_attempts || 0) + 1;
+      console.log("Stored password:", user.passwd);
+      const isMatch = await bcrypt.compare(password, user.passwd);
+      if (!isMatch) {
+        let failedAttempts = (user.failed_attempts || 0) + 1;
 
-      console.log("Failed attempts:", failedAttempts);
+        console.log("Failed attempts:", failedAttempts);
 
-      if (failedAttempts >= 5) {
-        await db.execute(
-          "UPDATE users SET failed_attempts = 0, locked_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE) WHERE id = ?",
-          [user.id],
-        );
+        if (failedAttempts >= 5) {
+          await db.execute(
+            "UPDATE users SET failed_attempts = 0, locked_until = DATE_ADD(NOW(), INTERVAL 15 MINUTE) WHERE id = ?",
+            [user.id],
+          );
 
-        return res.status(403).json({
-          code: "ACCOUNT_LOCKED",
-          message:
-            "Too many failed attempts. Your account is locked for 15 minutes.",
+          return res.status(403).json({
+            code: "ACCOUNT_LOCKED",
+            message:
+              "Too many failed attempts. Your account is locked for 15 minutes.",
+          });
+        }
+
+        await db.execute("UPDATE users SET failed_attempts = ? WHERE id = ?", [
+          failedAttempts,
+          user.id,
+        ]);
+
+        return res.status(401).json({
+          message: "Invalid Credentials",
         });
       }
 
-      await db.execute("UPDATE users SET failed_attempts = ? WHERE id = ?", [
-        failedAttempts,
-        user.id,
-      ]);
+      await db.execute(
+        "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?",
+        [user.id],
+      );
 
-      return res.status(401).json({
-        message: "Invalid Credentials",
+      const jwtToken = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, {
+        expiresIn: "1h",
       });
+
+      res.json({ jwtToken });
     }
-
-    await db.execute(
-      "UPDATE users SET failed_attempts = 0, locked_until = NULL WHERE id = ?",
-      [user.id],
-    );
-
-    const jwtToken = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, {
-      expiresIn: "1h",
-    });
-
-    res.json({ jwtToken });
   } catch (err) {
     console.error(err);
     res.status(500).send("Error logging in");

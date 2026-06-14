@@ -10,6 +10,7 @@ function HomeScreen() {
 
       try {
         const response = await axios.get("http://localhost:3000/dashboard", {
+          withCredentials: true,
           headers: {
             Authorization: `Bearer ${token}`,
           },

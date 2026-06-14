@@ -39,7 +39,11 @@ function LoginScreen() {
       });
 
       if (res.data.jwtToken) {
-        localStorage.setItem("token", res.data.jwtToken);
+        res.cookie("token", jwt, {
+          httpOnly: true,
+          secure: true,
+          sameSite: "Strict",
+        });
         navigate("/home");
       } else if (res.data.requireOTP) {
         navigate("/otpscreen");
